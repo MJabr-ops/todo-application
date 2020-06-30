@@ -1,27 +1,17 @@
 from rest_framework import serializers
 from .models import Karbar,todo,TodoBasket
 from django.contrib.auth.hashers import make_password
-from rest_framework_simplejwt.tokens import RefreshToken
+
 
 class KarbarSerializer(serializers.Serializer):
     first_name=serializers.CharField(max_length=50)
     last_name=serializers.CharField(max_length=50)
     email=serializers.EmailField()
     password=serializers.CharField(max_length=50)
-    tokens = serializers.SerializerMethodField()
+
     def create(self, validated_data):
 
         return Karbar.objects.create(**validated_data)
-
-    def get_tokens(self, user):
-        tokens = RefreshToken.for_user(user)
-        refresh = str(tokens)
-        access = str(tokens.access_token)
-        data = {
-            "refresh": refresh,
-            "access": access
-        }
-        return data
 
 
     def validate_password(self, value: str) -> str:

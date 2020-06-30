@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from rest_framework.views import APIView
-from rest_framework.decorators import api_view,APIView
+from rest_framework.decorators import api_view,APIView,permission_classes
 from rest_framework.response import Response
 # Create your views here.
 from .models import Karbar,todo as TodoModel,TodoBasket as BasketModel
@@ -9,18 +9,31 @@ from .serializers import KarbarSerializer,TodoBasketSerializer,TodoSerializer
 from rest_framework import status
 from django.http import Http404
 from django.shortcuts import render, get_object_or_404
+from rest_framework.permissions import AllowAny
 from django.contrib.auth.hashers import make_password, check_password
-from rest_framework_simplejwt.tokens import RefreshToken
+from django.conf import settings
+from django.core.cache.backends.base import DEFAULT_TIMEOUT
+from django.views.decorators.cache import cache_page
+from django.views.decorators.csrf import csrf_protect
+from rest_framework import exceptions
+from .utils import generate_access_token,generate_refresh_token
+import jwt
+from django.contrib.auth import get_user_model
+from .authenticate import SafeJWTAuthentication
+
+CACHE_TTL = getattr(settings, 'CACHE_TTL', DEFAULT_TIMEOUT)
+
+@permission_classes([AllowAny])
 @api_view(['POST'])
 def registerUser(request):
     userData=request.data
     user=KarbarSerializer(data=userData)
     if user.is_valid():
         print("is valid")
-        refresh = RefreshToken.for_user(user)
+
         user.save()
 
-        return Response({"success":True,"data":user.data,"refresh_token":str(refresh),"access_token":str(refresh.access_token)})
+        return Response({"success":True,"data":user.data})
 
     return Response("is not valid {}".format(user.errors))
 
@@ -30,15 +43,26 @@ class TodoBasket(APIView):
 
     def get(self,request,format=None):
 
-        basket=BasketModel.objects.filter(user=3)
-        print(basket)
-        json_basket=TodoBasketSerializer(basket,many=True)
+        user=SafeJWTAuthentication().authenticate(request)
 
-        return Response(json_basket.data)
+
+        if user is not None:
+
+
+            basket=BasketModel.objects.filter(user=user[0].id)
+
+
+            json_basket=TodoBasketSerializer(basket,many=True)
+
+            return Response(json_basket.data)
+        else:
+            return Response({'success':False,'error':'user not found'})
     def post(self,request,format=None):
         data=request.data
-        basket=TodoBasketSerializer(data=data)
-        print("data is ",data)
+
+        user = SafeJWTAuthentication().authenticate(request)
+        basket=TodoBasketSerializer(data={'title':data['title'],'user':user[0].id})
+
 
 
         if basket.is_valid():
@@ -51,6 +75,7 @@ class TodoBasket(APIView):
 class TodoBasketDetail(APIView):
     def get_object(self,pk):
         try:
+
             return BasketModel.objects.get(pk=pk)
 
         except BasketModel.DoesNotExist:
@@ -77,6 +102,7 @@ class TodoBasketDetail(APIView):
 
 
 class Todo(APIView):
+    #@cache_page(CACHE_TTL)
     def get(self,request,basket):
         todos=TodoModel.objects.filter(todoBasket=basket).order_by('-dateCreated')
         if(todos.count()==0):
@@ -121,49 +147,66 @@ class TodoDetail(APIView):
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def login(request):
-    try:
+    # try:
+        response=Response()
         if(request.data['email'] and request.data['password']):
             email=request.data['email']
             password=request.data['password']
-            user=get_object_or_404(Karbar,email=email)
+            if (email is None) or (password is None):
+                raise exceptions.AuthenticationFailed(
+                    'email and password required')
 
-            if(check_password(password,user.password)):
-                serialUser = KarbarSerializer(user)
+            user = Karbar.objects.filter(email=email).first()
+            if (user is None):
+                raise exceptions.AuthenticationFailed('user not found')
+            if (not user.check_password(password)):
+                raise exceptions.AuthenticationFailed('wrong password')
 
-                return Response(serialUser.data)
+            serialized_user = KarbarSerializer(user).data
 
-            else:
-                return Response({'success':False,'errors':"invalid password"})
+            access_token = generate_access_token(user)
+            refresh_token = generate_refresh_token(user)
+
+            response.set_cookie(key='refreshtoken', value=refresh_token, httponly=True)
+            response.data = {
+                'access_token': access_token,
+                'user': serialized_user,
+            }
+            return response
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@csrf_protect
+def refresh_token_view(request):
+    '''
+    To obtain a new access_token this view expects 2 important things:
+        1. a cookie that contains a valid refresh_token
+        2. a header 'X-CSRFTOKEN' with a valid csrf token, client app can get it from cookies "csrftoken"
+    '''
+    User = get_user_model()
+    refresh_token = request.COOKIES.get('refreshtoken')
+    if refresh_token is None:
+        raise exceptions.AuthenticationFailed(
+            'Authentication credentials were not provided.')
+    try:
+        payload = jwt.decode(
+            refresh_token, settings.SECRET_KEY, algorithms=['HS256'])
+    except jwt.ExpiredSignatureError:
+        raise exceptions.AuthenticationFailed(
+            'expired refresh token, please login again.')
+
+    user = User.objects.filter(id=payload.get('user_id')).first()
+    if user is None:
+        raise exceptions.AuthenticationFailed('User not found')
+
+    if not user.is_active:
+        raise exceptions.AuthenticationFailed('user is inactive')
 
 
-
-    except :
-        return Response({'success':False,'errors':"should contain valid email and password"},status=status.HTTP_400_BAD_REQUEST)
-
-
-@api_view(['GET'])
-def sendReact(request):
-    return Response({'name':'mohammad','lastname':'jabbari'})
-
-
-
-#todo jwt auth
-
-
-#todo custom permission,and user permission on modifying objects
-
-#todo redis cache
-#todo save users password with hashing
-
-
-
-
-#todo must be ordered by number
-
-
-
-
+    access_token = generate_access_token(user)
+    return Response({'access_token': access_token})
 
 
 

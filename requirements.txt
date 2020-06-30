@@ -1,0 +1,8 @@
+Django==3.0.7
+django-cors-headers==3.3.0
+django-debug-toolbar==2.2
+django-redis==4.12
+djangorestframework==3.11
+djangorestframwork-simplejwt==4.4.0
+redis==3.5
+

@@ -6,7 +6,7 @@ from django.utils.translation import ugettext_lazy as _
 
 from django.contrib.auth.models import BaseUserManager as UserManager
 
-
+import uuid
 
 class KarbarManager(UserManager):
     use_in_migrations=True
@@ -58,6 +58,7 @@ class Karbar(AbstractUser):
 
 user=get_user_model()
 class TodoBasket(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user=models.ForeignKey(user,on_delete=models.CASCADE,related_name='karbaresh')
     title=models.CharField(max_length=250,null=False,unique=True)
 
@@ -65,6 +66,7 @@ class TodoBasket(models.Model):
         return self.title
 
 class todo(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     todoBasket=models.ForeignKey(TodoBasket,on_delete=models.CASCADE)
     text=models.CharField(max_length=500)
     done=models.BooleanField(default=False)
